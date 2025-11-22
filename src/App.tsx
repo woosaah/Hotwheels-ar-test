@@ -14,6 +14,7 @@ import LeaderboardScreen from './screens/LeaderboardScreen';
 import CarGarageScreen from './screens/CarGarageScreen';
 import TournamentScreen from './screens/TournamentScreen';
 import TournamentBracketScreen from './screens/TournamentBracketScreen';
+import SettingsScreen from './screens/SettingsScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -84,6 +85,11 @@ function App(): React.JSX.Element {
           name="TournamentBracket"
           component={TournamentBracketScreen}
           options={{title: 'Bracket'}}
+        />
+        <Stack.Screen
+          name="Settings"
+          component={SettingsScreen}
+          options={{headerShown: false}}
         />
       </Stack.Navigator>
     </NavigationContainer>

@@ -52,6 +52,11 @@ export default function HomeScreen({navigation}: Props): React.JSX.Element {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => navigation.navigate('Settings')}>
+          <Text style={styles.settingsIcon}>⚙️</Text>
+        </TouchableOpacity>
         <Text style={styles.title}>Hot Wheels</Text>
         <Text style={styles.subtitle}>Speed Camera</Text>
       </View>
@@ -199,6 +204,16 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     paddingVertical: 25,
+    position: 'relative',
+  },
+  settingsButton: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    padding: 10,
+  },
+  settingsIcon: {
+    fontSize: 24,
   },
   title: {
     fontSize: 36,

@@ -199,6 +199,86 @@ export const LANE_COLORS = ['#4ecdc4', '#ff6b35', '#7bed9f', '#ffd93d', '#6c5ce7
 // Hot Wheels scale is typically 1:64
 export const HOT_WHEELS_SCALE = 64;
 
+// ============ API SETTINGS ============
+
+export type DataMode = 'local' | 'api';
+
+export interface ApiSettings {
+  mode: DataMode;
+  apiUrl: string; // Base URL for tournament API
+  apiKey?: string; // Optional API key for authentication
+  autoSync: boolean; // Auto-sync results to API
+  syncVideos: boolean; // Whether to upload race videos
+  lastSyncAt?: number; // Last successful sync timestamp
+}
+
+export const DEFAULT_API_SETTINGS: ApiSettings = {
+  mode: 'local',
+  apiUrl: '',
+  autoSync: true,
+  syncVideos: false,
+};
+
+// ============ API TYPES (Boilerplate - adjust to your API structure) ============
+
+// These are placeholder types - update when you have your API structure
+export interface ApiTournament {
+  id: string;
+  name: string;
+  type: 'bracket' | 'league';
+  status: string;
+  // Add your tournament fields here
+  [key: string]: unknown;
+}
+
+export interface ApiBracket {
+  id: string;
+  tournamentId: string;
+  rounds: ApiRound[];
+  // Add your bracket fields here
+  [key: string]: unknown;
+}
+
+export interface ApiRound {
+  id: string;
+  roundNumber: number;
+  name: string;
+  matches: ApiMatch[];
+  // Add your round fields here
+  [key: string]: unknown;
+}
+
+export interface ApiMatch {
+  id: string;
+  roundId: string;
+  participant1Id?: string;
+  participant2Id?: string;
+  winnerId?: string;
+  status: string;
+  // Add your match fields here
+  [key: string]: unknown;
+}
+
+export interface ApiRaceResult {
+  matchId: string;
+  winnerId: string;
+  participant1Time?: number;
+  participant2Time?: number;
+  participant1Speed?: number;
+  participant2Speed?: number;
+  winMargin?: number;
+  videoUrl?: string;
+  // Add your result fields here
+  [key: string]: unknown;
+}
+
+export interface ApiParticipant {
+  id: string;
+  name: string;
+  // Add your participant fields here
+  [key: string]: unknown;
+}
+
 // ============ NAVIGATION ============
 
 export type RootStackParamList = {
