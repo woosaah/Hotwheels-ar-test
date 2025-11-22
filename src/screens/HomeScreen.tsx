@@ -5,11 +5,10 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Alert,
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import type {RootStackParamList, CalibrationData} from '../types';
-import {loadCalibration, getStats} from '../services/database';
+import type {RootStackParamList, CalibrationData, RaceMode} from '../types';
+import {loadCalibration, getStats, loadCars, loadTournaments} from '../services/database';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
@@ -20,7 +19,10 @@ export default function HomeScreen({navigation}: Props): React.JSX.Element {
     avgSpeed: 0,
     topSpeed: 0,
     avgScaleSpeed: 0,
+    totalCars: 0,
+    totalTournaments: 0,
   });
+  const [activeTournaments, setActiveTournaments] = useState(0);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
@@ -30,25 +32,21 @@ export default function HomeScreen({navigation}: Props): React.JSX.Element {
   }, [navigation]);
 
   const loadData = async () => {
-    const cal = await loadCalibration();
+    const [cal, s, cars, tournaments] = await Promise.all([
+      loadCalibration(),
+      getStats(),
+      loadCars(),
+      loadTournaments(),
+    ]);
     setCalibration(cal);
-    const s = await getStats();
-    setStats(s);
+    setStats({...s, totalCars: cars.length, totalTournaments: tournaments.length});
+    setActiveTournaments(
+      tournaments.filter(t => t.status === 'in_progress').length,
+    );
   };
 
-  const handleStartRace = () => {
-    if (!calibration) {
-      Alert.alert(
-        'Calibration Required',
-        'Please calibrate your camera first by setting up distance markers.',
-        [
-          {text: 'Cancel', style: 'cancel'},
-          {text: 'Calibrate', onPress: () => navigation.navigate('Calibration')},
-        ],
-      );
-      return;
-    }
-    navigation.navigate('Calibration');
+  const handleStartRace = (mode: RaceMode) => {
+    navigation.navigate('Calibration', {mode});
   };
 
   return (
@@ -71,69 +69,122 @@ export default function HomeScreen({navigation}: Props): React.JSX.Element {
           <Text style={styles.statLabel}>Top km/h</Text>
         </View>
         <View style={styles.statBox}>
-          <Text style={styles.statValue}>
-            {stats.avgScaleSpeed > 0 ? Math.round(stats.avgScaleSpeed) : '-'}
-          </Text>
-          <Text style={styles.statLabel}>Avg Scale km/h</Text>
+          <Text style={styles.statValue}>{stats.totalCars}</Text>
+          <Text style={styles.statLabel}>Cars</Text>
         </View>
       </View>
 
-      {/* Calibration Status */}
-      <View style={styles.statusCard}>
-        <Text style={styles.statusTitle}>Calibration Status</Text>
-        {calibration ? (
-          <View>
-            <Text style={styles.statusText}>
-              Distance: {calibration.distanceMeters * 100} cm
-            </Text>
-            <Text style={styles.statusText}>
-              Last calibrated:{' '}
-              {new Date(calibration.createdAt).toLocaleDateString()}
-            </Text>
-            <TouchableOpacity
-              style={styles.recalibrateButton}
-              onPress={() => navigation.navigate('Calibration')}>
-              <Text style={styles.recalibrateText}>Recalibrate</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View>
-            <Text style={styles.statusWarning}>Not calibrated</Text>
-            <Text style={styles.statusHint}>
-              Place markers on your track and calibrate before racing
-            </Text>
-          </View>
-        )}
+      {/* Race Mode Selection */}
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Start Racing</Text>
       </View>
 
-      {/* Main Actions */}
-      <TouchableOpacity style={styles.mainButton} onPress={handleStartRace}>
-        <Text style={styles.mainButtonText}>Start Race</Text>
+      <TouchableOpacity
+        style={styles.raceModeCard}
+        onPress={() => handleStartRace('time_trial')}>
+        <View style={styles.raceModeIcon}>
+          <Text style={styles.raceModeEmoji}>⏱️</Text>
+        </View>
+        <View style={styles.raceModeInfo}>
+          <Text style={styles.raceModeTitle}>Time Trial</Text>
+          <Text style={styles.raceModeDesc}>
+            Single car speed measurement. Test your car's top speed!
+          </Text>
+        </View>
+        <Text style={styles.raceModeArrow}>→</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
-        style={styles.secondaryButton}
-        onPress={() => navigation.navigate('Leaderboard')}>
-        <Text style={styles.secondaryButtonText}>View Leaderboard</Text>
+        style={styles.raceModeCard}
+        onPress={() => handleStartRace('head_to_head')}>
+        <View style={[styles.raceModeIcon, {backgroundColor: '#ff6b35'}]}>
+          <Text style={styles.raceModeEmoji}>🏁</Text>
+        </View>
+        <View style={styles.raceModeInfo}>
+          <Text style={styles.raceModeTitle}>Head-to-Head</Text>
+          <Text style={styles.raceModeDesc}>
+            Race 2 cars side by side. First across the finish line wins!
+          </Text>
+        </View>
+        <Text style={styles.raceModeArrow}>→</Text>
       </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.raceModeCard}
+        onPress={() => navigation.navigate('Tournament')}>
+        <View style={[styles.raceModeIcon, {backgroundColor: '#9b59b6'}]}>
+          <Text style={styles.raceModeEmoji}>🏆</Text>
+        </View>
+        <View style={styles.raceModeInfo}>
+          <Text style={styles.raceModeTitle}>Tournament</Text>
+          <Text style={styles.raceModeDesc}>
+            Bracket-style competition. Crown the ultimate champion!
+          </Text>
+          {activeTournaments > 0 && (
+            <View style={styles.activeBadge}>
+              <Text style={styles.activeBadgeText}>
+                {activeTournaments} active
+              </Text>
+            </View>
+          )}
+        </View>
+        <Text style={styles.raceModeArrow}>→</Text>
+      </TouchableOpacity>
+
+      {/* Quick Actions */}
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Quick Actions</Text>
+      </View>
+
+      <View style={styles.quickActions}>
+        <TouchableOpacity
+          style={styles.quickActionButton}
+          onPress={() => navigation.navigate('CarGarage')}>
+          <Text style={styles.quickActionEmoji}>🚗</Text>
+          <Text style={styles.quickActionText}>Garage</Text>
+          <Text style={styles.quickActionCount}>{stats.totalCars}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.quickActionButton}
+          onPress={() => navigation.navigate('Leaderboard')}>
+          <Text style={styles.quickActionEmoji}>📊</Text>
+          <Text style={styles.quickActionText}>Leaderboard</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.quickActionButton}
+          onPress={() => navigation.navigate('Calibration', {})}>
+          <Text style={styles.quickActionEmoji}>⚙️</Text>
+          <Text style={styles.quickActionText}>Calibrate</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Calibration Status */}
+      {calibration && (
+        <View style={styles.calibrationCard}>
+          <Text style={styles.calibrationTitle}>Track Calibrated</Text>
+          <Text style={styles.calibrationText}>
+            Distance: {(calibration.distanceMeters * 100).toFixed(0)} cm •{' '}
+            {calibration.lanes?.length || 1} lane(s)
+          </Text>
+        </View>
+      )}
 
       {/* Instructions */}
       <View style={styles.instructions}>
-        <Text style={styles.instructionsTitle}>How to Use</Text>
+        <Text style={styles.instructionsTitle}>Quick Start Guide</Text>
         <Text style={styles.instructionText}>
-          1. Place two markers on your track at a known distance (e.g., 50cm)
+          1. Place markers on your track at a known distance
         </Text>
         <Text style={styles.instructionText}>
-          2. Calibrate by marking the distance in the app
+          2. Choose a race mode and calibrate
         </Text>
         <Text style={styles.instructionText}>
-          3. Select your car's color for tracking
+          3. Add your cars to the garage
         </Text>
         <Text style={styles.instructionText}>
-          4. Record your car racing through the markers
-        </Text>
-        <Text style={styles.instructionText}>
-          5. View actual speed and scale speed (1:64)
+          4. Race and see who's the fastest!
         </Text>
       </View>
     </ScrollView>
@@ -147,7 +198,7 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    paddingVertical: 30,
+    paddingVertical: 25,
   },
   title: {
     fontSize: 36,
@@ -182,72 +233,112 @@ const styles = StyleSheet.create({
     color: '#888',
     marginTop: 5,
   },
-  statusCard: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 20,
-    padding: 20,
-    borderRadius: 12,
-    marginBottom: 20,
+  sectionHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 10,
   },
-  statusTitle: {
+  sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
-    marginBottom: 10,
   },
-  statusText: {
-    fontSize: 14,
-    color: '#ccc',
-    marginBottom: 5,
-  },
-  statusWarning: {
-    fontSize: 16,
-    color: '#ff6b35',
-    fontWeight: 'bold',
-  },
-  statusHint: {
-    fontSize: 12,
-    color: '#888',
-    marginTop: 5,
-  },
-  recalibrateButton: {
-    marginTop: 10,
-    padding: 10,
-    backgroundColor: '#2a2a4e',
-    borderRadius: 8,
+  raceModeCard: {
+    flexDirection: 'row',
     alignItems: 'center',
-  },
-  recalibrateText: {
-    color: '#4ecdc4',
-    fontWeight: 'bold',
-  },
-  mainButton: {
-    backgroundColor: '#ff6b35',
+    backgroundColor: '#1a1a2e',
     marginHorizontal: 20,
-    padding: 18,
+    marginBottom: 12,
+    padding: 16,
     borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 15,
   },
-  mainButtonText: {
-    fontSize: 20,
+  raceModeIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#4ecdc4',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  raceModeEmoji: {
+    fontSize: 24,
+  },
+  raceModeInfo: {
+    flex: 1,
+    marginLeft: 15,
+  },
+  raceModeTitle: {
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
   },
-  secondaryButton: {
+  raceModeDesc: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 4,
+  },
+  raceModeArrow: {
+    fontSize: 24,
+    color: '#4ecdc4',
+  },
+  activeBadge: {
+    backgroundColor: '#ff6b35',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginTop: 5,
+    alignSelf: 'flex-start',
+  },
+  activeBadgeText: {
+    fontSize: 10,
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  quickActions: {
+    flexDirection: 'row',
+    paddingHorizontal: 15,
+    marginBottom: 20,
+  },
+  quickActionButton: {
+    flex: 1,
     backgroundColor: '#1a1a2e',
-    marginHorizontal: 20,
+    marginHorizontal: 5,
     padding: 15,
     borderRadius: 12,
     alignItems: 'center',
-    marginBottom: 20,
+  },
+  quickActionEmoji: {
+    fontSize: 24,
+    marginBottom: 5,
+  },
+  quickActionText: {
+    fontSize: 12,
+    color: '#fff',
+  },
+  quickActionCount: {
+    fontSize: 14,
+    color: '#4ecdc4',
+    fontWeight: 'bold',
+    marginTop: 3,
+  },
+  calibrationCard: {
+    backgroundColor: '#1a2a2e',
+    marginHorizontal: 20,
+    padding: 15,
+    borderRadius: 12,
+    marginBottom: 15,
     borderWidth: 1,
     borderColor: '#4ecdc4',
   },
-  secondaryButtonText: {
-    fontSize: 16,
+  calibrationTitle: {
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#4ecdc4',
+  },
+  calibrationText: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 5,
   },
   instructions: {
     backgroundColor: '#1a1a2e',

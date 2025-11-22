@@ -1,104 +1,124 @@
 # Hot Wheels Speed Camera
 
-A React Native app for measuring Hot Wheels car speed using your phone's camera.
+A React Native app for measuring Hot Wheels car speed using your phone's camera. Features multi-car racing, winner detection, and tournament brackets!
 
 ## Features
 
-- **Camera-based speed measurement** - Record your Hot Wheels cars racing through markers
-- **Color tracking** - Detects cars based on their primary color
-- **Real speed & scale speed** - Shows actual speed and equivalent full-scale speed (1:64 ratio)
-- **Calibration system** - Set up distance markers for accurate measurements
-- **Leaderboard** - Track your fastest cars across sessions
-- **Local storage** - All data stored on device using AsyncStorage
+### Race Modes
+- **Time Trial** - Single car speed measurement. Test your car's top speed!
+- **Head-to-Head** - Race 2-4 cars side by side. First across the finish line wins!
+- **Tournament** - Bracket-style competition with Best-of-1/3/5 format
+
+### Core Features
+- **Finish Line Detection** - Configurable start and finish line positions
+- **Multi-Lane Support** - Up to 4 lanes for simultaneous racing
+- **Winner Detection** - Automatic winner determination with podium display
+- **Car Garage** - Store and track stats for all your Hot Wheels cars
+- **Leaderboard** - Track fastest speeds across all races
+- **Scale Speed** - Shows equivalent full-scale speed (1:64 ratio)
+
+### Technical
+- 1080p @ 60fps video capture
+- Color-based car tracking
+- Local data storage using AsyncStorage
+- Haptic feedback for countdown and winner
 
 ## Requirements
 
-- Android device (tested on Samsung A73)
+- Android device (tested on Samsung A73 with Snapdragon 778G)
 - Node.js 18+
 - React Native development environment
 
 ## Setup
 
-1. **Install dependencies:**
 ```bash
+# Install dependencies
 npm install
-```
 
-2. **Install pods (if building for iOS):**
-```bash
-cd ios && pod install && cd ..
-```
-
-3. **Run on Android:**
-```bash
+# Run on Android
 npm run android
 ```
 
 ## How to Use
 
-### 1. Calibration
-- Place two markers on your Hot Wheels track at a known distance (e.g., 50cm)
-- Open the app and go to Calibration
-- Enter the exact distance between markers
-- Position the on-screen markers to match your physical markers
-- Select your car's primary color
+### 1. Add Cars to Garage
+- Go to Garage from home screen
+- Add your Hot Wheels cars with names and colors
+- Track win/loss records and best speeds
 
-### 2. Recording
-- Position your phone so both markers are visible
-- Press Record and let your car race through the markers
-- Press Stop when the car has passed through
+### 2. Calibrate Track
+- Place physical markers on your Hot Wheels track
+- Enter the distance between start and finish (e.g., 50cm)
+- Drag on-screen markers to match your track
+- For head-to-head, configure number of lanes
 
-### 3. Results
-- View actual speed in km/h
-- View scale speed (what the speed would be at 1:64 scale)
+### 3. Race!
+- **Time Trial**: Select one car, record its run
+- **Head-to-Head**: Select cars for each lane, press START RACE
+- **Tournament**: Create bracket, race through rounds
+
+### 4. View Results
+- Winner announcement with celebration
+- Podium display (1st, 2nd, 3rd place)
+- Speed stats: actual km/h and scale speed
+- Win margin in milliseconds
 - Share results with friends
-- Results are automatically saved to the leaderboard
-
-## Technical Details
-
-- **Framework:** React Native 0.79
-- **Camera:** react-native-vision-camera v4
-- **Video:** 1080p @ 60fps
-- **Tracking:** Color-based blob detection
-- **Storage:** AsyncStorage
-- **Scale factor:** 64x (1:64 Hot Wheels scale)
-
-## Speed Calculation
-
-Speed is calculated using:
-```
-speed (m/s) = distance (m) / time (s)
-time (s) = frames / fps
-scale_speed = actual_speed × 64
-```
 
 ## Project Structure
 
 ```
 src/
-├── App.tsx              # Main app with navigation
+├── App.tsx                      # Navigation setup
 ├── screens/
-│   ├── HomeScreen.tsx       # Home with stats and quick actions
-│   ├── CalibrationScreen.tsx # Distance and color setup
-│   ├── RecordingScreen.tsx   # Camera recording with markers
-│   ├── ResultsScreen.tsx     # Speed results display
-│   └── LeaderboardScreen.tsx # Race history and rankings
+│   ├── HomeScreen.tsx           # Mode selection & stats
+│   ├── CalibrationScreen.tsx    # Track setup with finish line
+│   ├── RaceSetupScreen.tsx      # Car selection per lane
+│   ├── RecordingScreen.tsx      # Race view with tracking
+│   ├── WinnerScreen.tsx         # Podium & results
+│   ├── ResultsScreen.tsx        # Individual race stats
+│   ├── LeaderboardScreen.tsx    # Speed rankings
+│   ├── CarGarageScreen.tsx      # Car management
+│   ├── TournamentScreen.tsx     # Tournament list & creation
+│   └── TournamentBracketScreen.tsx # Bracket view
 ├── services/
-│   └── database.ts      # AsyncStorage operations
+│   └── database.ts              # AsyncStorage operations
 ├── utils/
-│   └── speedCalculator.ts # Speed and color detection logic
+│   └── speedCalculator.ts       # Speed & color detection
 └── types/
-    └── index.ts         # TypeScript interfaces
+    └── index.ts                 # TypeScript interfaces
 ```
 
-## Future Improvements
+## Speed Calculation
 
-- [ ] Real-time frame processor for live car tracking
-- [ ] Video playback with tracking overlay
-- [ ] Multiple car detection
-- [ ] Export race videos with speed overlay
-- [ ] Custom car profiles with photos
-- [ ] Track templates for different Hot Wheels sets
+```
+time (s) = frames_between_markers / fps
+speed (m/s) = distance (m) / time (s)
+speed (km/h) = speed (m/s) × 3.6
+scale_speed = actual_speed × 64  // 1:64 Hot Wheels scale
+```
+
+## Winner Determination
+
+In head-to-head mode, the winner is determined by:
+1. First car to cross the finish line
+2. Win margin calculated in milliseconds
+3. DNF (Did Not Finish) for cars that don't complete
+
+## Data Storage
+
+All data is stored locally:
+- **Cars**: Name, color, race statistics
+- **Race Results**: Times, speeds, winner, positions
+- **Tournaments**: Brackets, match results, champions
+- **Calibration**: Track setup for consistent measurements
+
+## Tech Stack
+
+- React Native 0.79
+- react-native-vision-camera v4
+- @react-navigation/native v7
+- AsyncStorage for persistence
+- TypeScript
 
 ## License
 

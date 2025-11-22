@@ -6,9 +6,14 @@ import {StatusBar} from 'react-native';
 import type {RootStackParamList} from './types';
 import HomeScreen from './screens/HomeScreen';
 import CalibrationScreen from './screens/CalibrationScreen';
+import RaceSetupScreen from './screens/RaceSetupScreen';
 import RecordingScreen from './screens/RecordingScreen';
 import ResultsScreen from './screens/ResultsScreen';
+import WinnerScreen from './screens/WinnerScreen';
 import LeaderboardScreen from './screens/LeaderboardScreen';
+import CarGarageScreen from './screens/CarGarageScreen';
+import TournamentScreen from './screens/TournamentScreen';
+import TournamentBracketScreen from './screens/TournamentBracketScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -38,12 +43,17 @@ function App(): React.JSX.Element {
         <Stack.Screen
           name="Calibration"
           component={CalibrationScreen}
-          options={{title: 'Calibration'}}
+          options={{title: 'Track Setup'}}
+        />
+        <Stack.Screen
+          name="RaceSetup"
+          component={RaceSetupScreen}
+          options={{title: 'Race Setup'}}
         />
         <Stack.Screen
           name="Recording"
           component={RecordingScreen}
-          options={{title: 'Record Race', headerShown: false}}
+          options={{headerShown: false}}
         />
         <Stack.Screen
           name="Results"
@@ -51,9 +61,29 @@ function App(): React.JSX.Element {
           options={{title: 'Race Results'}}
         />
         <Stack.Screen
+          name="Winner"
+          component={WinnerScreen}
+          options={{title: 'Race Complete', headerBackVisible: false}}
+        />
+        <Stack.Screen
           name="Leaderboard"
           component={LeaderboardScreen}
           options={{title: 'Leaderboard'}}
+        />
+        <Stack.Screen
+          name="CarGarage"
+          component={CarGarageScreen}
+          options={{title: 'My Garage'}}
+        />
+        <Stack.Screen
+          name="Tournament"
+          component={TournamentScreen}
+          options={{title: 'Tournaments'}}
+        />
+        <Stack.Screen
+          name="TournamentBracket"
+          component={TournamentBracketScreen}
+          options={{title: 'Bracket'}}
         />
       </Stack.Navigator>
     </NavigationContainer>

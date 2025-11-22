@@ -15,37 +15,56 @@ import {
   useCameraPermission,
 } from 'react-native-vision-camera';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import type {RootStackParamList, CalibrationData, ColorRange} from '../types';
-import {HOT_WHEELS_COLORS} from '../types';
-import {saveCalibration} from '../services/database';
+import type {RootStackParamList, CalibrationData, LaneConfig, RaceMode} from '../types';
+import {LANE_COLORS} from '../types';
+import {saveCalibration, generateId} from '../services/database';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Calibration'>;
 
 const {width: SCREEN_WIDTH} = Dimensions.get('window');
-const PREVIEW_HEIGHT = 300;
+const PREVIEW_HEIGHT = 280;
 
-export default function CalibrationScreen({navigation}: Props): React.JSX.Element {
+export default function CalibrationScreen({navigation, route}: Props): React.JSX.Element {
+  const raceMode: RaceMode = route.params?.mode || 'time_trial';
   const {hasPermission, requestPermission} = useCameraPermission();
   const device = useCameraDevice('back');
   const cameraRef = useRef<Camera>(null);
 
-  const [step, setStep] = useState(1); // 1: distance, 2: markers, 3: color
+  const [step, setStep] = useState(1);
   const [distanceCm, setDistanceCm] = useState('50');
-  const [markerStart, setMarkerStart] = useState(0.2);
-  const [markerEnd, setMarkerEnd] = useState(0.8);
-  const [selectedColor, setSelectedColor] = useState<ColorRange>(HOT_WHEELS_COLORS[0]);
-  const [isDragging, setIsDragging] = useState<'start' | 'end' | null>(null);
+  const [markerStart, setMarkerStart] = useState(0.15);
+  const [markerEnd, setMarkerEnd] = useState(0.85);
+  const [finishLine, setFinishLine] = useState(0.85);
+  const [laneCount, setLaneCount] = useState(raceMode === 'head_to_head' ? 2 : 1);
+  const [lanes, setLanes] = useState<LaneConfig[]>([]);
+  const [isDragging, setIsDragging] = useState<'start' | 'end' | 'finish' | null>(null);
+
+  // Initialize lanes based on count
+  React.useEffect(() => {
+    const newLanes: LaneConfig[] = [];
+    for (let i = 0; i < laneCount; i++) {
+      const yPos = laneCount === 1 ? 0.5 : 0.3 + (i * 0.4) / (laneCount - 1 || 1);
+      newLanes.push({
+        id: i + 1,
+        yPosition: yPos,
+        name: `Lane ${i + 1}`,
+        color: LANE_COLORS[i % LANE_COLORS.length],
+      });
+    }
+    setLanes(newLanes);
+  }, [laneCount]);
 
   const handleMarkerDrag = useCallback(
     (x: number) => {
-      const normalizedX = Math.max(0, Math.min(1, x / SCREEN_WIDTH));
+      const normalizedX = Math.max(0.05, Math.min(0.95, x / SCREEN_WIDTH));
       if (isDragging === 'start') {
-        setMarkerStart(Math.min(normalizedX, markerEnd - 0.1));
-      } else if (isDragging === 'end') {
+        setMarkerStart(Math.min(normalizedX, finishLine - 0.1));
+      } else if (isDragging === 'finish') {
+        setFinishLine(Math.max(normalizedX, markerStart + 0.1));
         setMarkerEnd(Math.max(normalizedX, markerStart + 0.1));
       }
     },
-    [isDragging, markerStart, markerEnd],
+    [isDragging, markerStart, finishLine],
   );
 
   const handleSaveCalibration = async () => {
@@ -56,17 +75,20 @@ export default function CalibrationScreen({navigation}: Props): React.JSX.Elemen
     }
 
     const calibration: CalibrationData = {
+      id: generateId(),
       distanceMeters: distance / 100,
-      pixelDistance: (markerEnd - markerStart) * SCREEN_WIDTH,
+      pixelDistance: (finishLine - markerStart) * SCREEN_WIDTH,
       markerStartX: markerStart,
-      markerEndX: markerEnd,
+      markerEndX: finishLine,
+      finishLineX: finishLine,
       frameWidth: 1920,
       frameHeight: 1080,
+      lanes,
       createdAt: Date.now(),
     };
 
     await saveCalibration(calibration);
-    navigation.navigate('Recording', {calibration, selectedColor});
+    navigation.navigate('RaceSetup', {calibration, mode: raceMode});
   };
 
   if (!hasPermission) {
@@ -92,27 +114,37 @@ export default function CalibrationScreen({navigation}: Props): React.JSX.Elemen
     );
   }
 
+  const totalSteps = raceMode === 'head_to_head' ? 4 : 3;
+
   return (
     <ScrollView style={styles.container}>
-      {/* Step Indicator */}
-      <View style={styles.stepIndicator}>
-        <View style={[styles.stepDot, step >= 1 && styles.stepDotActive]} />
-        <View style={styles.stepLine} />
-        <View style={[styles.stepDot, step >= 2 && styles.stepDotActive]} />
-        <View style={styles.stepLine} />
-        <View style={[styles.stepDot, step >= 3 && styles.stepDotActive]} />
+      {/* Mode Badge */}
+      <View style={styles.modeBadge}>
+        <Text style={styles.modeBadgeText}>
+          {raceMode === 'time_trial' ? '⏱️ Time Trial' : '🏁 Head-to-Head'}
+        </Text>
       </View>
 
+      {/* Step Indicator */}
+      <View style={styles.stepIndicator}>
+        {Array.from({length: totalSteps}).map((_, i) => (
+          <React.Fragment key={i}>
+            <View style={[styles.stepDot, step > i && styles.stepDotActive]} />
+            {i < totalSteps - 1 && <View style={styles.stepLine} />}
+          </React.Fragment>
+        ))}
+      </View>
+
+      {/* Step 1: Distance */}
       {step === 1 && (
         <View style={styles.stepContainer}>
-          <Text style={styles.stepTitle}>Step 1: Set Distance</Text>
+          <Text style={styles.stepTitle}>Step 1: Set Track Distance</Text>
           <Text style={styles.stepDescription}>
-            Place two markers on your track at a known distance apart.
-            Measure the exact distance between them.
+            Measure the distance from the start to the finish line on your track.
           </Text>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Distance between markers (cm)</Text>
+            <Text style={styles.inputLabel}>Track length (cm)</Text>
             <TextInput
               style={styles.input}
               value={distanceCm}
@@ -126,7 +158,7 @@ export default function CalibrationScreen({navigation}: Props): React.JSX.Elemen
           <View style={styles.presetContainer}>
             <Text style={styles.presetLabel}>Quick select:</Text>
             <View style={styles.presetButtons}>
-              {['30', '50', '100'].map(preset => (
+              {['30', '50', '100', '150'].map(preset => (
                 <TouchableOpacity
                   key={preset}
                   style={[
@@ -139,163 +171,262 @@ export default function CalibrationScreen({navigation}: Props): React.JSX.Elemen
                       styles.presetButtonText,
                       distanceCm === preset && styles.presetButtonTextActive,
                     ]}>
-                    {preset} cm
+                    {preset}cm
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
           </View>
 
-          <TouchableOpacity
-            style={styles.nextButton}
-            onPress={() => setStep(2)}>
-            <Text style={styles.nextButtonText}>Next: Set Markers</Text>
+          <TouchableOpacity style={styles.nextButton} onPress={() => setStep(2)}>
+            <Text style={styles.nextButtonText}>Next: Position Markers</Text>
           </TouchableOpacity>
         </View>
       )}
 
+      {/* Step 2: Position Start & Finish Lines */}
       {step === 2 && (
         <View style={styles.stepContainer}>
-          <Text style={styles.stepTitle}>Step 2: Position Markers</Text>
+          <Text style={styles.stepTitle}>Step 2: Position Start & Finish</Text>
           <Text style={styles.stepDescription}>
-            Align the markers below with your physical markers on the track.
-            Drag them to match your setup.
+            Drag the markers to align with your track's start and finish lines.
           </Text>
 
-          {/* Camera Preview with Markers */}
           <View style={styles.cameraContainer}>
             <Camera
               ref={cameraRef}
               style={styles.camera}
               device={device}
               isActive={true}
-              video={false}
-              photo={false}
             />
 
-            {/* Marker Overlay */}
             <View
               style={styles.markerOverlay}
               onTouchStart={e => {
                 const x = e.nativeEvent.locationX;
                 const startDist = Math.abs(x - markerStart * SCREEN_WIDTH);
-                const endDist = Math.abs(x - markerEnd * SCREEN_WIDTH);
-                setIsDragging(startDist < endDist ? 'start' : 'end');
+                const finishDist = Math.abs(x - finishLine * SCREEN_WIDTH);
+                setIsDragging(startDist < finishDist ? 'start' : 'finish');
               }}
               onTouchMove={e => handleMarkerDrag(e.nativeEvent.locationX)}
               onTouchEnd={() => setIsDragging(null)}>
-              {/* Start Marker */}
+              {/* Start Line */}
               <View
-                style={[
-                  styles.marker,
-                  styles.markerStart,
-                  {left: markerStart * SCREEN_WIDTH - 2},
-                ]}>
-                <Text style={styles.markerLabel}>START</Text>
+                style={[styles.marker, styles.markerStart, {left: markerStart * SCREEN_WIDTH - 2}]}>
+                <View style={styles.markerLabelContainer}>
+                  <Text style={styles.markerLabel}>START</Text>
+                </View>
               </View>
 
-              {/* End Marker */}
+              {/* Finish Line */}
               <View
-                style={[
-                  styles.marker,
-                  styles.markerEnd,
-                  {left: markerEnd * SCREEN_WIDTH - 2},
-                ]}>
-                <Text style={styles.markerLabel}>END</Text>
+                style={[styles.marker, styles.markerFinish, {left: finishLine * SCREEN_WIDTH - 2}]}>
+                <View style={[styles.markerLabelContainer, {backgroundColor: '#ff6b35'}]}>
+                  <Text style={styles.markerLabel}>FINISH</Text>
+                </View>
               </View>
 
-              {/* Distance Line */}
+              {/* Track Zone */}
               <View
                 style={[
-                  styles.distanceLine,
+                  styles.trackZone,
                   {
                     left: markerStart * SCREEN_WIDTH,
-                    width: (markerEnd - markerStart) * SCREEN_WIDTH,
+                    width: (finishLine - markerStart) * SCREEN_WIDTH,
                   },
+                ]}
+              />
+
+              {/* Checkered pattern on finish */}
+              <View
+                style={[
+                  styles.checkeredFinish,
+                  {left: finishLine * SCREEN_WIDTH - 15},
                 ]}
               />
             </View>
           </View>
 
           <Text style={styles.markerInfo}>
-            Marker positions: {Math.round(markerStart * 100)}% -{' '}
-            {Math.round(markerEnd * 100)}%
+            Start: {Math.round(markerStart * 100)}% | Finish:{' '}
+            {Math.round(finishLine * 100)}%
           </Text>
 
           <View style={styles.buttonRow}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => setStep(1)}>
+            <TouchableOpacity style={styles.backButton} onPress={() => setStep(1)}>
               <Text style={styles.backButtonText}>Back</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.nextButton}
-              onPress={() => setStep(3)}>
-              <Text style={styles.nextButtonText}>Next: Select Color</Text>
+            <TouchableOpacity style={styles.nextButton} onPress={() => setStep(3)}>
+              <Text style={styles.nextButtonText}>
+                {raceMode === 'head_to_head' ? 'Next: Set Lanes' : 'Next: Confirm'}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
       )}
 
-      {step === 3 && (
+      {/* Step 3: Lane Setup (Head-to-Head only) */}
+      {step === 3 && raceMode === 'head_to_head' && (
         <View style={styles.stepContainer}>
-          <Text style={styles.stepTitle}>Step 3: Select Car Color</Text>
+          <Text style={styles.stepTitle}>Step 3: Configure Lanes</Text>
           <Text style={styles.stepDescription}>
-            Choose the primary color of your Hot Wheels car for tracking.
+            Set up lanes for head-to-head racing. Each car will race in its own lane.
           </Text>
 
-          <View style={styles.colorGrid}>
-            {HOT_WHEELS_COLORS.filter(c => !c.name.includes('wrap')).map(
-              color => (
+          <View style={styles.laneCountContainer}>
+            <Text style={styles.laneCountLabel}>Number of lanes:</Text>
+            <View style={styles.laneCountButtons}>
+              {[2, 3, 4].map(count => (
                 <TouchableOpacity
-                  key={color.name}
+                  key={count}
                   style={[
-                    styles.colorButton,
-                    {backgroundColor: getColorPreview(color)},
-                    selectedColor.name === color.name && styles.colorButtonSelected,
+                    styles.laneCountButton,
+                    laneCount === count && styles.laneCountButtonActive,
                   ]}
-                  onPress={() => setSelectedColor(color)}>
-                  <Text style={styles.colorButtonText}>{color.name}</Text>
+                  onPress={() => setLaneCount(count)}>
+                  <Text
+                    style={[
+                      styles.laneCountButtonText,
+                      laneCount === count && styles.laneCountButtonTextActive,
+                    ]}>
+                    {count}
+                  </Text>
                 </TouchableOpacity>
-              ),
-            )}
+              ))}
+            </View>
           </View>
 
+          <View style={styles.cameraContainer}>
+            <Camera
+              ref={cameraRef}
+              style={styles.camera}
+              device={device}
+              isActive={true}
+            />
+
+            <View style={styles.laneOverlay}>
+              {/* Lane indicators */}
+              {lanes.map((lane, index) => (
+                <View
+                  key={lane.id}
+                  style={[
+                    styles.laneIndicator,
+                    {
+                      top: lane.yPosition * PREVIEW_HEIGHT - 15,
+                      backgroundColor: lane.color,
+                    },
+                  ]}>
+                  <Text style={styles.laneIndicatorText}>{lane.name}</Text>
+                </View>
+              ))}
+
+              {/* Lane lines */}
+              {lanes.map(lane => (
+                <View
+                  key={`line-${lane.id}`}
+                  style={[
+                    styles.laneLine,
+                    {
+                      top: lane.yPosition * PREVIEW_HEIGHT,
+                      borderColor: lane.color,
+                    },
+                  ]}
+                />
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.buttonRow}>
+            <TouchableOpacity style={styles.backButton} onPress={() => setStep(2)}>
+              <Text style={styles.backButtonText}>Back</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.nextButton} onPress={() => setStep(4)}>
+              <Text style={styles.nextButtonText}>Next: Confirm</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Final Step: Confirmation */}
+      {((step === 3 && raceMode === 'time_trial') ||
+        (step === 4 && raceMode === 'head_to_head')) && (
+        <View style={styles.stepContainer}>
+          <Text style={styles.stepTitle}>
+            Step {step}: Confirm Calibration
+          </Text>
+
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryTitle}>Calibration Summary</Text>
-            <Text style={styles.summaryText}>
-              Distance: {distanceCm} cm
-            </Text>
-            <Text style={styles.summaryText}>
-              Markers: {Math.round(markerStart * 100)}% -{' '}
-              {Math.round(markerEnd * 100)}%
-            </Text>
-            <Text style={styles.summaryText}>
-              Tracking Color: {selectedColor.name}
-            </Text>
+            <Text style={styles.summaryTitle}>Track Setup</Text>
+
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Mode:</Text>
+              <Text style={styles.summaryValue}>
+                {raceMode === 'time_trial' ? 'Time Trial' : 'Head-to-Head'}
+              </Text>
+            </View>
+
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Track Length:</Text>
+              <Text style={styles.summaryValue}>{distanceCm} cm</Text>
+            </View>
+
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Lanes:</Text>
+              <Text style={styles.summaryValue}>{laneCount}</Text>
+            </View>
+
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Start Position:</Text>
+              <Text style={styles.summaryValue}>{Math.round(markerStart * 100)}%</Text>
+            </View>
+
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Finish Line:</Text>
+              <Text style={styles.summaryValue}>{Math.round(finishLine * 100)}%</Text>
+            </View>
+          </View>
+
+          {/* Mini preview */}
+          <View style={styles.miniPreview}>
+            <View
+              style={[
+                styles.miniStart,
+                {left: `${markerStart * 100}%`},
+              ]}
+            />
+            <View
+              style={[
+                styles.miniFinish,
+                {left: `${finishLine * 100}%`},
+              ]}
+            />
+            <View
+              style={[
+                styles.miniTrack,
+                {
+                  left: `${markerStart * 100}%`,
+                  width: `${(finishLine - markerStart) * 100}%`,
+                },
+              ]}
+            />
           </View>
 
           <View style={styles.buttonRow}>
             <TouchableOpacity
               style={styles.backButton}
-              onPress={() => setStep(2)}>
+              onPress={() => setStep(step - 1)}>
               <Text style={styles.backButtonText}>Back</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.saveButton}
               onPress={handleSaveCalibration}>
-              <Text style={styles.saveButtonText}>Start Recording</Text>
+              <Text style={styles.saveButtonText}>Start Racing!</Text>
             </TouchableOpacity>
           </View>
         </View>
       )}
     </ScrollView>
   );
-}
-
-function getColorPreview(color: ColorRange): string {
-  const hue = (color.hueMin + color.hueMax) / 2;
-  return `hsl(${hue}, 70%, 50%)`;
 }
 
 const styles = StyleSheet.create({
@@ -321,6 +452,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 50,
   },
+  modeBadge: {
+    alignSelf: 'center',
+    backgroundColor: '#1a1a2e',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginTop: 15,
+  },
+  modeBadgeText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
   stepIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -337,7 +481,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#4ecdc4',
   },
   stepLine: {
-    width: 50,
+    width: 40,
     height: 2,
     backgroundColor: '#333',
   },
@@ -428,26 +572,41 @@ const styles = StyleSheet.create({
   markerStart: {
     backgroundColor: '#4ecdc4',
   },
-  markerEnd: {
+  markerFinish: {
     backgroundColor: '#ff6b35',
   },
-  markerLabel: {
+  markerLabelContainer: {
     position: 'absolute',
     top: 10,
     left: 8,
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#fff',
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    backgroundColor: '#4ecdc4',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 4,
   },
-  distanceLine: {
+  markerLabel: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  trackZone: {
     position: 'absolute',
-    top: PREVIEW_HEIGHT / 2,
-    height: 2,
-    backgroundColor: '#fff',
+    top: '35%',
+    height: '30%',
+    backgroundColor: 'rgba(78, 205, 196, 0.1)',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: 'rgba(78, 205, 196, 0.3)',
+  },
+  checkeredFinish: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 30,
+    backgroundColor: 'rgba(255, 107, 53, 0.3)',
+    borderLeftWidth: 2,
+    borderRightWidth: 2,
+    borderColor: '#ff6b35',
   },
   markerInfo: {
     textAlign: 'center',
@@ -455,31 +614,61 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 20,
   },
-  colorGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+  laneCountContainer: {
     marginBottom: 20,
   },
-  colorButton: {
-    width: '30%',
-    aspectRatio: 1.5,
+  laneCountLabel: {
+    fontSize: 14,
+    color: '#ccc',
+    marginBottom: 10,
+  },
+  laneCountButtons: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  laneCountButton: {
+    flex: 1,
+    padding: 15,
+    backgroundColor: '#1a1a2e',
     borderRadius: 12,
-    justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 3,
-    borderColor: 'transparent',
+    borderWidth: 2,
+    borderColor: '#333',
   },
-  colorButtonSelected: {
-    borderColor: '#fff',
+  laneCountButtonActive: {
+    borderColor: '#4ecdc4',
+    backgroundColor: '#1a2a2e',
   },
-  colorButtonText: {
-    color: '#fff',
+  laneCountButtonText: {
+    fontSize: 24,
     fontWeight: 'bold',
-    fontSize: 12,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: {width: 1, height: 1},
-    textShadowRadius: 2,
+    color: '#888',
+  },
+  laneCountButtonTextActive: {
+    color: '#4ecdc4',
+  },
+  laneOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  laneIndicator: {
+    position: 'absolute',
+    left: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  laneIndicatorText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  laneLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 0,
+    borderTopWidth: 2,
+    borderStyle: 'dashed',
   },
   summaryCard: {
     backgroundColor: '#1a1a2e',
@@ -488,15 +677,51 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   summaryTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
+    marginBottom: 15,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginBottom: 10,
   },
-  summaryText: {
+  summaryLabel: {
     fontSize: 14,
-    color: '#ccc',
-    marginBottom: 5,
+    color: '#888',
+  },
+  summaryValue: {
+    fontSize: 14,
+    color: '#4ecdc4',
+    fontWeight: 'bold',
+  },
+  miniPreview: {
+    height: 40,
+    backgroundColor: '#1a1a2e',
+    borderRadius: 8,
+    marginBottom: 20,
+    position: 'relative',
+  },
+  miniStart: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 3,
+    backgroundColor: '#4ecdc4',
+  },
+  miniFinish: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 3,
+    backgroundColor: '#ff6b35',
+  },
+  miniTrack: {
+    position: 'absolute',
+    top: 15,
+    height: 10,
+    backgroundColor: 'rgba(78, 205, 196, 0.3)',
   },
   buttonRow: {
     flexDirection: 'row',

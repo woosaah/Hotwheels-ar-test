@@ -4,48 +4,60 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Alert,
   Dimensions,
+  Vibration,
 } from 'react-native';
 import {
   Camera,
   useCameraDevice,
-  useFrameProcessor,
   useCameraFormat,
 } from 'react-native-vision-camera';
-import {useSharedValue, runOnJS} from 'react-native-reanimated';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import type {RootStackParamList, CarPosition, RaceSession} from '../types';
-import {calculateSpeed} from '../utils/speedCalculator';
-import {addSession, generateId} from '../services/database';
+import type {
+  RootStackParamList,
+  RaceResult,
+  LapResult,
+  SpeedMeasurement,
+} from '../types';
+import {HOT_WHEELS_SCALE} from '../types';
+import {addRaceResult, generateId, addSession} from '../services/database';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Recording'>;
 
 const {width: SCREEN_WIDTH, height: SCREEN_HEIGHT} = Dimensions.get('window');
 
+type RaceState = 'ready' | 'countdown' | 'racing' | 'finished';
+
+interface CarTrackingState {
+  carId: string;
+  carName: string;
+  lane: number;
+  color: string;
+  hasStarted: boolean;
+  hasCrossedFinish: boolean;
+  startFrame: number | null;
+  finishFrame: number | null;
+  positions: {x: number; frame: number}[];
+}
+
 export default function RecordingScreen({
   navigation,
   route,
 }: Props): React.JSX.Element {
-  const {calibration, selectedColor} = route.params;
+  const {calibration, raceConfig} = route.params;
   const device = useCameraDevice('back');
   const cameraRef = useRef<Camera>(null);
 
-  const [isRecording, setIsRecording] = useState(false);
+  const [raceState, setRaceState] = useState<RaceState>('ready');
+  const [countdown, setCountdown] = useState(3);
   const [recordingTime, setRecordingTime] = useState(0);
-  const [carDetected, setCarDetected] = useState(false);
-  const [currentX, setCurrentX] = useState(0);
+  const [carStates, setCarStates] = useState<CarTrackingState[]>([]);
+  const [winner, setWinner] = useState<CarTrackingState | null>(null);
 
-  // Store positions during recording
-  const positionsRef = useRef<CarPosition[]>([]);
   const frameCountRef = useRef(0);
   const startTimeRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
 
-  // Shared values for frame processor
-  const isProcessing = useSharedValue(false);
-
-  // Use 1080p@60fps format
   const format = useCameraFormat(device, [
     {videoResolution: {width: 1920, height: 1080}},
     {fps: 60},
@@ -54,150 +66,223 @@ export default function RecordingScreen({
   const fps = format?.maxFps || 60;
 
   useEffect(() => {
+    // Initialize car tracking states
+    const initialStates: CarTrackingState[] = raceConfig.cars.map(rc => ({
+      carId: rc.car.id,
+      carName: rc.car.name,
+      lane: rc.lane,
+      color: rc.color.name,
+      hasStarted: false,
+      hasCrossedFinish: false,
+      startFrame: null,
+      finishFrame: null,
+      positions: [],
+    }));
+    setCarStates(initialStates);
+
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
     };
-  }, []);
+  }, [raceConfig]);
 
-  const updateDetection = useCallback((detected: boolean, x: number) => {
-    setCarDetected(detected);
-    setCurrentX(x);
-  }, []);
+  const startCountdown = () => {
+    setRaceState('countdown');
+    setCountdown(3);
 
-  // Frame processor for real-time tracking
-  // Note: In production, this would use a native frame processor plugin
-  // for actual pixel-level color detection. For now, we simulate detection.
-  const frameProcessor = useFrameProcessor(
-    frame => {
-      'worklet';
-      if (isProcessing.value) {
-        return;
+    let count = 3;
+    const countdownInterval = setInterval(() => {
+      count -= 1;
+      setCountdown(count);
+      Vibration.vibrate(100);
+
+      if (count <= 0) {
+        clearInterval(countdownInterval);
+        startRace();
       }
+    }, 1000);
+  };
 
-      // In a real implementation, we would:
-      // 1. Access frame.toArrayBuffer() or use a native plugin
-      // 2. Process pixels to detect the target color blob
-      // 3. Calculate centroid position
-      //
-      // Since frame processors require native modules for pixel access,
-      // we'll handle actual tracking in the video analysis phase.
-      //
-      // This processor tracks frame timing for accurate speed calculation.
+  const startRace = async () => {
+    setRaceState('racing');
+    frameCountRef.current = 0;
+    startTimeRef.current = Date.now();
+    setRecordingTime(0);
 
-      const timestamp = frame.timestamp;
-      runOnJS(updateDetection)(false, 0);
-    },
-    [updateDetection],
-  );
+    Vibration.vibrate([0, 200, 100, 200]); // Go signal!
 
-  const startRecording = async () => {
-    if (!cameraRef.current) return;
+    // Start timer
+    timerRef.current = setInterval(() => {
+      setRecordingTime(t => t + 100);
+      frameCountRef.current += 6; // ~60fps, update every 100ms = 6 frames
 
-    try {
-      positionsRef.current = [];
-      frameCountRef.current = 0;
-      startTimeRef.current = Date.now();
-      setIsRecording(true);
-      setRecordingTime(0);
+      // Simulate car tracking
+      simulateCarTracking();
+    }, 100);
 
-      // Start timer
-      timerRef.current = setInterval(() => {
-        setRecordingTime(t => t + 100);
-      }, 100);
-
-      // Start video recording
+    // Start recording
+    if (cameraRef.current) {
       cameraRef.current.startRecording({
         onRecordingFinished: video => {
-          processRecording(video.path);
+          console.log('Recording saved:', video.path);
         },
         onRecordingError: error => {
           console.error('Recording error:', error);
-          Alert.alert('Recording Error', error.message);
-          stopRecording();
         },
       });
-    } catch (error) {
-      console.error('Failed to start recording:', error);
-      Alert.alert('Error', 'Failed to start recording');
     }
   };
 
-  const stopRecording = async () => {
+  const simulateCarTracking = useCallback(() => {
+    setCarStates(prevStates => {
+      const newStates = [...prevStates];
+      let raceFinished = false;
+      let raceWinner: CarTrackingState | null = null;
+
+      newStates.forEach((state, index) => {
+        if (state.hasCrossedFinish) return;
+
+        // Simulate car movement (random speed variation per car)
+        const baseSpeed = 0.015 + Math.random() * 0.01;
+        const laneBonus = (index + 1) * 0.001; // Slight lane advantage
+        const speed = baseSpeed + laneBonus + Math.random() * 0.005;
+
+        const lastPos = state.positions.length > 0
+          ? state.positions[state.positions.length - 1].x
+          : calibration.markerStartX - 0.1;
+
+        const newX = Math.min(lastPos + speed, 1);
+
+        // Check if crossed start
+        if (!state.hasStarted && newX >= calibration.markerStartX) {
+          state.hasStarted = true;
+          state.startFrame = frameCountRef.current;
+        }
+
+        // Check if crossed finish
+        if (state.hasStarted && !state.hasCrossedFinish && newX >= calibration.finishLineX) {
+          state.hasCrossedFinish = true;
+          state.finishFrame = frameCountRef.current;
+
+          if (!raceWinner) {
+            raceWinner = state;
+            raceFinished = true;
+          }
+        }
+
+        state.positions.push({x: newX, frame: frameCountRef.current});
+      });
+
+      // Check if race should end
+      const allFinished = newStates.every(s => s.hasCrossedFinish);
+      const timeout = frameCountRef.current > fps * 10; // 10 second timeout
+
+      if (raceFinished && raceWinner && !winner) {
+        setWinner(raceWinner);
+        Vibration.vibrate([0, 300, 100, 300, 100, 300]); // Winner celebration
+      }
+
+      if (allFinished || timeout) {
+        finishRace(newStates);
+      }
+
+      return newStates;
+    });
+  }, [calibration, fps, winner]);
+
+  const finishRace = async (finalStates: CarTrackingState[]) => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
     }
-    setIsRecording(false);
 
     if (cameraRef.current) {
       await cameraRef.current.stopRecording();
     }
-  };
 
-  const processRecording = async (videoPath: string) => {
-    // Simulate car detection from video
-    // In production, this would analyze the video frames
-    const simulatedPositions = generateSimulatedPositions();
+    setRaceState('finished');
 
-    if (simulatedPositions.length < 2) {
-      Alert.alert(
-        'No Car Detected',
-        'Could not detect the car in the recording. Please try again with better lighting or adjust the color selection.',
-        [{text: 'Try Again', onPress: () => {}}],
-      );
-      return;
-    }
+    // Calculate results
+    const sortedByFinish = [...finalStates]
+      .filter(s => s.hasCrossedFinish)
+      .sort((a, b) => (a.finishFrame || 999999) - (b.finishFrame || 999999));
 
-    const measurement = calculateSpeed(simulatedPositions, calibration, fps);
+    const lapResults: LapResult[] = finalStates.map((state, index) => {
+      const finishOrder = sortedByFinish.findIndex(s => s.carId === state.carId) + 1;
+      const frames = (state.finishFrame || frameCountRef.current) - (state.startFrame || 0);
+      const timeMs = (frames / fps) * 1000;
+      const speedKmh = (calibration.distanceMeters / (timeMs / 1000)) * 3.6;
 
-    if (!measurement) {
-      Alert.alert(
-        'Speed Calculation Failed',
-        'Could not calculate speed. Make sure the car passes through both markers.',
-      );
-      return;
-    }
+      const measurement: SpeedMeasurement = {
+        speedKmh: Math.round(speedKmh * 100) / 100,
+        scaleSpeedKmh: Math.round(speedKmh * HOT_WHEELS_SCALE * 100) / 100,
+        timeMs: Math.round(timeMs),
+        distanceMeters: calibration.distanceMeters,
+        startFrame: state.startFrame || 0,
+        endFrame: state.finishFrame || frameCountRef.current,
+        fps,
+      };
 
-    const session: RaceSession = {
+      return {
+        carId: state.carId,
+        carName: state.carName,
+        carColor: state.color,
+        lane: state.lane,
+        measurement,
+        finishTime: state.finishFrame || 0,
+        finishOrder: finishOrder || finalStates.length,
+        didFinish: state.hasCrossedFinish,
+        disqualified: false,
+      };
+    });
+
+    const winnerResult = lapResults.find(l => l.finishOrder === 1) || null;
+    const secondPlace = lapResults.find(l => l.finishOrder === 2);
+    const winMargin = winnerResult && secondPlace
+      ? secondPlace.measurement.timeMs - winnerResult.measurement.timeMs
+      : undefined;
+
+    const raceResult: RaceResult = {
       id: generateId(),
-      carName: `${selectedColor.name} Racer`,
-      carColor: selectedColor.name,
-      measurement,
-      calibrationId: `${calibration.createdAt}`,
-      videoPath,
+      mode: raceConfig.mode,
+      calibrationId: calibration.id,
+      laps: lapResults,
+      winner: winnerResult,
+      winMargin,
       createdAt: Date.now(),
     };
 
-    await addSession(session);
-    navigation.replace('Results', {session});
-  };
+    await addRaceResult(raceResult);
 
-  const generateSimulatedPositions = (): CarPosition[] => {
-    // Simulate a car traveling through the frame
-    // This simulates detection data that would come from actual video analysis
-    const positions: CarPosition[] = [];
-    const totalFrames = Math.floor((recordingTime / 1000) * fps);
-
-    // Simulate car entering at around frame 10 and exiting around frame 30
-    // This creates a realistic "crossing" scenario
-    const entryFrame = Math.floor(totalFrames * 0.2);
-    const exitFrame = Math.floor(totalFrames * 0.6);
-
-    for (let i = entryFrame; i <= exitFrame; i++) {
-      const progress = (i - entryFrame) / (exitFrame - entryFrame);
-      const x = calibration.markerStartX + progress * (calibration.markerEndX - calibration.markerStartX);
-
-      positions.push({
-        x,
-        y: 0.5,
-        timestamp: (i / fps) * 1000,
-        frameNumber: i,
-        confidence: 0.8 + Math.random() * 0.2,
-      });
+    // Also add to legacy sessions for leaderboard compatibility
+    for (const lap of lapResults) {
+      if (lap.didFinish) {
+        await addSession({
+          id: generateId(),
+          carName: lap.carName,
+          carColor: lap.carColor,
+          measurement: lap.measurement,
+          calibrationId: calibration.id,
+          createdAt: Date.now(),
+          raceResultId: raceResult.id,
+        });
+      }
     }
 
-    return positions;
+    // Navigate to winner screen
+    setTimeout(() => {
+      navigation.replace('Winner', {raceResult});
+    }, 1500);
+  };
+
+  const handleCancel = async () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+    if (cameraRef.current && raceState === 'racing') {
+      await cameraRef.current.stopRecording();
+    }
+    navigation.goBack();
   };
 
   if (!device) {
@@ -218,63 +303,73 @@ export default function RecordingScreen({
         video={true}
         audio={false}
         format={format}
-        frameProcessor={frameProcessor}
       />
 
-      {/* Marker Overlay */}
+      {/* Track Overlay */}
       <View style={styles.overlay}>
-        {/* Start Marker */}
+        {/* Start Line */}
         <View
           style={[
-            styles.markerLine,
+            styles.startLine,
             {left: calibration.markerStartX * SCREEN_WIDTH},
           ]}
         />
-        {/* End Marker */}
+
+        {/* Finish Line */}
         <View
           style={[
-            styles.markerLine,
-            styles.markerLineEnd,
-            {left: calibration.markerEndX * SCREEN_WIDTH},
-          ]}
-        />
+            styles.finishLine,
+            {left: calibration.finishLineX * SCREEN_WIDTH},
+          ]}>
+          <View style={styles.checkeredPattern} />
+        </View>
 
-        {/* Detection Zone */}
-        <View
-          style={[
-            styles.detectionZone,
-            {
-              left: calibration.markerStartX * SCREEN_WIDTH,
-              width: (calibration.markerEndX - calibration.markerStartX) * SCREEN_WIDTH,
-            },
-          ]}
-        />
-
-        {/* Car Position Indicator */}
-        {carDetected && (
+        {/* Lane Lines */}
+        {calibration.lanes.map(lane => (
           <View
+            key={lane.id}
             style={[
-              styles.carIndicator,
-              {left: currentX * SCREEN_WIDTH - 10},
+              styles.laneLine,
+              {
+                top: lane.yPosition * SCREEN_HEIGHT * 0.6 + SCREEN_HEIGHT * 0.2,
+                borderColor: lane.color,
+              },
             ]}
           />
-        )}
+        ))}
+
+        {/* Car Position Indicators */}
+        {raceState === 'racing' && carStates.map(car => {
+          const lastPos = car.positions[car.positions.length - 1];
+          if (!lastPos) return null;
+          const lane = calibration.lanes.find(l => l.id === car.lane);
+          return (
+            <View
+              key={car.carId}
+              style={[
+                styles.carIndicator,
+                {
+                  left: lastPos.x * SCREEN_WIDTH - 15,
+                  top: (lane?.yPosition || 0.5) * SCREEN_HEIGHT * 0.6 + SCREEN_HEIGHT * 0.2 - 15,
+                  backgroundColor: getColorHex(car.color),
+                  borderColor: car.hasCrossedFinish ? '#ffd700' : '#fff',
+                },
+              ]}>
+              <Text style={styles.carIndicatorText}>{car.lane}</Text>
+            </View>
+          );
+        })}
       </View>
 
-      {/* Top Info Bar */}
+      {/* Top Bar */}
       <View style={styles.topBar}>
-        <TouchableOpacity
-          style={styles.closeButton}
-          onPress={() => navigation.goBack()}>
-          <Text style={styles.closeButtonText}>X</Text>
+        <TouchableOpacity style={styles.closeButton} onPress={handleCancel}>
+          <Text style={styles.closeButtonText}>×</Text>
         </TouchableOpacity>
 
-        <View style={styles.infoContainer}>
-          <Text style={styles.infoText}>
-            Color: {selectedColor.name}
-          </Text>
-          <Text style={styles.infoText}>
-            Distance: {calibration.distanceMeters * 100}cm
+        <View style={styles.modeContainer}>
+          <Text style={styles.modeText}>
+            {raceConfig.mode === 'time_trial' ? 'TIME TRIAL' : 'HEAD-TO-HEAD'}
           </Text>
         </View>
 
@@ -283,47 +378,88 @@ export default function RecordingScreen({
         </View>
       </View>
 
-      {/* Recording Timer */}
-      {isRecording && (
-        <View style={styles.timerContainer}>
-          <View style={styles.recordingIndicator} />
-          <Text style={styles.timerText}>
-            {(recordingTime / 1000).toFixed(1)}s
+      {/* Countdown Overlay */}
+      {raceState === 'countdown' && (
+        <View style={styles.countdownOverlay}>
+          <Text style={styles.countdownText}>
+            {countdown > 0 ? countdown : 'GO!'}
           </Text>
         </View>
       )}
 
-      {/* Bottom Controls */}
-      <View style={styles.bottomBar}>
-        <View style={styles.instructionContainer}>
-          {!isRecording ? (
-            <Text style={styles.instructionText}>
-              Position camera to see both markers, then press Record
+      {/* Race Status */}
+      {raceState === 'racing' && (
+        <View style={styles.raceStatus}>
+          <View style={styles.timerContainer}>
+            <View style={styles.recordingDot} />
+            <Text style={styles.timerText}>
+              {(recordingTime / 1000).toFixed(1)}s
             </Text>
-          ) : (
-            <Text style={styles.instructionText}>
-              Recording... Stop when car has passed through
-            </Text>
-          )}
+          </View>
+
+          {/* Car Status */}
+          <View style={styles.carStatusContainer}>
+            {carStates.map(car => (
+              <View
+                key={car.carId}
+                style={[
+                  styles.carStatus,
+                  {borderLeftColor: getColorHex(car.color)},
+                ]}>
+                <Text style={styles.carStatusName}>{car.carName}</Text>
+                <Text style={styles.carStatusState}>
+                  {car.hasCrossedFinish
+                    ? '🏁 FINISHED!'
+                    : car.hasStarted
+                    ? 'Racing...'
+                    : 'Waiting...'}
+                </Text>
+              </View>
+            ))}
+          </View>
         </View>
+      )}
 
-        <TouchableOpacity
-          style={[styles.recordButton, isRecording && styles.recordButtonActive]}
-          onPress={isRecording ? stopRecording : startRecording}>
-          <View
-            style={[
-              styles.recordButtonInner,
-              isRecording && styles.recordButtonInnerActive,
-            ]}
-          />
-        </TouchableOpacity>
+      {/* Winner Announcement */}
+      {winner && raceState === 'finished' && (
+        <View style={styles.winnerOverlay}>
+          <Text style={styles.winnerLabel}>WINNER!</Text>
+          <Text style={styles.winnerName}>{winner.carName}</Text>
+          <Text style={styles.winnerLane}>Lane {winner.lane}</Text>
+        </View>
+      )}
 
-        <Text style={styles.buttonLabel}>
-          {isRecording ? 'Stop' : 'Record'}
-        </Text>
-      </View>
+      {/* Bottom Controls */}
+      {raceState === 'ready' && (
+        <View style={styles.bottomBar}>
+          <View style={styles.instructionContainer}>
+            <Text style={styles.instructionText}>
+              Position cars at the start line, then press Start
+            </Text>
+          </View>
+
+          <TouchableOpacity style={styles.startButton} onPress={startCountdown}>
+            <Text style={styles.startButtonText}>START RACE</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
+}
+
+function getColorHex(colorName: string): string {
+  const colors: Record<string, string> = {
+    Red: '#e74c3c',
+    Orange: '#e67e22',
+    Yellow: '#f1c40f',
+    Green: '#27ae60',
+    Blue: '#3498db',
+    Purple: '#9b59b6',
+    Pink: '#e91e63',
+    White: '#ecf0f1',
+    Black: '#2c3e50',
+  };
+  return colors[colorName] || '#888';
 }
 
 const styles = StyleSheet.create({
@@ -340,34 +476,48 @@ const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
   },
-  markerLine: {
+  startLine: {
     position: 'absolute',
     top: 0,
     bottom: 0,
-    width: 3,
+    width: 4,
     backgroundColor: '#4ecdc4',
   },
-  markerLineEnd: {
-    backgroundColor: '#ff6b35',
-  },
-  detectionZone: {
+  finishLine: {
     position: 'absolute',
-    top: '30%',
-    height: '40%',
-    backgroundColor: 'rgba(78, 205, 196, 0.1)',
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: 'rgba(78, 205, 196, 0.3)',
+    top: 0,
+    bottom: 0,
+    width: 20,
+    backgroundColor: 'rgba(255, 107, 53, 0.5)',
+    borderLeftWidth: 4,
+    borderRightWidth: 4,
+    borderColor: '#ff6b35',
+  },
+  checkeredPattern: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+  laneLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 0,
+    borderTopWidth: 2,
+    borderStyle: 'dashed',
   },
   carIndicator: {
     position: 'absolute',
-    top: '48%',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#ff6b35',
-    borderWidth: 2,
-    borderColor: '#fff',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+  },
+  carIndicatorText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#fff',
   },
   topBar: {
     position: 'absolute',
@@ -389,18 +539,19 @@ const styles = StyleSheet.create({
   },
   closeButtonText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 24,
     fontWeight: 'bold',
   },
-  infoContainer: {
+  modeContainer: {
     backgroundColor: 'rgba(0,0,0,0.5)',
     paddingHorizontal: 15,
     paddingVertical: 8,
     borderRadius: 8,
   },
-  infoText: {
-    color: '#fff',
-    fontSize: 12,
+  modeText: {
+    color: '#ff6b35',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   fpsContainer: {
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -413,28 +564,94 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
   },
-  timerContainer: {
+  countdownOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  countdownText: {
+    fontSize: 120,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  raceStatus: {
     position: 'absolute',
-    top: 110,
-    alignSelf: 'center',
+    top: 100,
+    left: 20,
+    right: 20,
+  },
+  timerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 25,
+    marginBottom: 15,
+  },
+  recordingDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#ff0000',
+    marginRight: 10,
+  },
+  timerText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  carStatusContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  carStatus: {
     backgroundColor: 'rgba(0,0,0,0.7)',
     paddingHorizontal: 15,
     paddingVertical: 8,
-    borderRadius: 20,
+    borderRadius: 8,
+    borderLeftWidth: 4,
   },
-  recordingIndicator: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#ff0000',
-    marginRight: 8,
-  },
-  timerText: {
-    color: '#fff',
-    fontSize: 18,
+  carStatusName: {
+    fontSize: 12,
     fontWeight: 'bold',
+    color: '#fff',
+  },
+  carStatusState: {
+    fontSize: 10,
+    color: '#888',
+  },
+  winnerOverlay: {
+    position: 'absolute',
+    top: '40%',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    paddingHorizontal: 40,
+    paddingVertical: 30,
+    borderRadius: 20,
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#ffd700',
+  },
+  winnerLabel: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#ffd700',
+    marginBottom: 10,
+  },
+  winnerName: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  winnerLane: {
+    fontSize: 16,
+    color: '#888',
+    marginTop: 5,
   },
   bottomBar: {
     position: 'absolute',
@@ -456,34 +673,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  recordButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 4,
-    borderColor: '#fff',
-  },
-  recordButtonActive: {
-    backgroundColor: 'rgba(255,0,0,0.3)',
-    borderColor: '#ff0000',
-  },
-  recordButtonInner: {
-    width: 60,
-    height: 60,
+  startButton: {
+    backgroundColor: '#ff6b35',
+    paddingHorizontal: 50,
+    paddingVertical: 18,
     borderRadius: 30,
-    backgroundColor: '#ff0000',
   },
-  recordButtonInnerActive: {
-    width: 30,
-    height: 30,
-    borderRadius: 5,
-  },
-  buttonLabel: {
+  startButtonText: {
+    fontSize: 20,
+    fontWeight: 'bold',
     color: '#fff',
-    fontSize: 14,
-    marginTop: 10,
   },
 });
