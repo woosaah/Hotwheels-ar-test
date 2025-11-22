@@ -269,9 +269,13 @@ export default function RecordingScreen({
       }
     }
 
-    // Navigate to winner screen
+    // Navigate to winner screen with tournament context if applicable
     setTimeout(() => {
-      navigation.replace('Winner', {raceResult});
+      navigation.replace('Winner', {
+        raceResult,
+        tournamentId: raceConfig.tournamentId,
+        matchId: raceConfig.matchId,
+      });
     }, 1500);
   };
 
@@ -369,7 +373,7 @@ export default function RecordingScreen({
 
         <View style={styles.modeContainer}>
           <Text style={styles.modeText}>
-            {raceConfig.mode === 'time_trial' ? 'TIME TRIAL' : 'HEAD-TO-HEAD'}
+            {raceConfig.mode === 'time_trial' ? 'TIME TRIAL' : raceConfig.mode === 'tournament' ? 'TOURNAMENT' : 'HEAD-TO-HEAD'}
           </Text>
         </View>
 

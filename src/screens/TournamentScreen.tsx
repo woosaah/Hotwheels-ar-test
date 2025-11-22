@@ -74,6 +74,9 @@ export default function TournamentScreen({navigation}: Props): React.JSX.Element
       currentCars.push(null);
     }
 
+    // First, create all rounds with matches (so we can reference their IDs)
+    const allRoundMatches: TournamentMatch[][] = [];
+
     // Create first round matches
     const firstRoundMatches: TournamentMatch[] = [];
     for (let i = 0; i < currentCars.length; i += 2) {
@@ -92,12 +95,7 @@ export default function TournamentScreen({navigation}: Props): React.JSX.Element
       };
       firstRoundMatches.push(match);
     }
-
-    rounds.push({
-      roundNumber: 1,
-      name: getRoundName(1, totalRounds),
-      matches: firstRoundMatches,
-    });
+    allRoundMatches.push(firstRoundMatches);
 
     // Create subsequent rounds (empty, to be filled as tournament progresses)
     let matchCount = firstRoundMatches.length / 2;
@@ -115,12 +113,48 @@ export default function TournamentScreen({navigation}: Props): React.JSX.Element
           status: 'pending',
         });
       }
-      rounds.push({
-        roundNumber: round,
-        name: getRoundName(round, totalRounds),
-        matches: roundMatches,
-      });
+      allRoundMatches.push(roundMatches);
       matchCount = matchCount / 2;
+    }
+
+    // Now link matches to their next matches
+    for (let roundIndex = 0; roundIndex < allRoundMatches.length - 1; roundIndex++) {
+      const currentRound = allRoundMatches[roundIndex];
+      const nextRound = allRoundMatches[roundIndex + 1];
+
+      for (let matchIndex = 0; matchIndex < currentRound.length; matchIndex++) {
+        const match = currentRound[matchIndex];
+        const nextMatchIndex = Math.floor(matchIndex / 2);
+        match.nextMatchId = nextRound[nextMatchIndex].id;
+        match.nextMatchSlot = matchIndex % 2 === 0 ? 'car1' : 'car2';
+      }
+    }
+
+    // Build rounds array with proper names
+    for (let i = 0; i < allRoundMatches.length; i++) {
+      rounds.push({
+        roundNumber: i + 1,
+        name: getRoundName(i + 1, totalRounds),
+        matches: allRoundMatches[i],
+      });
+    }
+
+    // Auto-advance byes in first round
+    for (const match of allRoundMatches[0]) {
+      if (match.status === 'bye' && match.winner && match.nextMatchId) {
+        // Place the winner in the next match
+        for (let roundIdx = 1; roundIdx < allRoundMatches.length; roundIdx++) {
+          const nextMatch = allRoundMatches[roundIdx].find(m => m.id === match.nextMatchId);
+          if (nextMatch) {
+            if (match.nextMatchSlot === 'car1') {
+              nextMatch.car1 = match.winner;
+            } else {
+              nextMatch.car2 = match.winner;
+            }
+            break;
+          }
+        }
+      }
     }
 
     return {rounds};

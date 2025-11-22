@@ -6,6 +6,7 @@ import type {
   CarStats,
   RaceResult,
   Tournament,
+  TournamentMatch,
   ColorRange,
 } from '../types';
 
@@ -216,6 +217,97 @@ export async function deleteTournament(tournamentId: string): Promise<void> {
 export async function getTournament(tournamentId: string): Promise<Tournament | null> {
   const tournaments = await loadTournaments();
   return tournaments.find(t => t.id === tournamentId) || null;
+}
+
+export async function updateTournamentMatch(
+  tournamentId: string,
+  matchId: string,
+  raceResult: RaceResult,
+): Promise<Tournament | null> {
+  const tournaments = await loadTournaments();
+  const tournamentIndex = tournaments.findIndex(t => t.id === tournamentId);
+
+  if (tournamentIndex === -1) return null;
+
+  const tournament = tournaments[tournamentIndex];
+  let matchFound = false;
+
+  // Find and update the match
+  for (const round of tournament.bracket.rounds) {
+    const matchIndex = round.matches.findIndex(m => m.id === matchId);
+    if (matchIndex !== -1) {
+      const match = round.matches[matchIndex];
+      matchFound = true;
+
+      // Add race result to match
+      match.races.push(raceResult);
+
+      // Update win counts
+      if (raceResult.winner) {
+        if (raceResult.winner.carId === match.car1?.id) {
+          match.car1Wins += 1;
+        } else if (raceResult.winner.carId === match.car2?.id) {
+          match.car2Wins += 1;
+        }
+      }
+
+      // Check if match is complete (best of N)
+      const winsNeeded = Math.ceil(tournament.bestOf / 2);
+      if (match.car1Wins >= winsNeeded) {
+        match.winner = match.car1;
+        match.status = 'completed';
+        advanceWinner(tournament, match, match.car1!);
+      } else if (match.car2Wins >= winsNeeded) {
+        match.winner = match.car2;
+        match.status = 'completed';
+        advanceWinner(tournament, match, match.car2!);
+      }
+
+      break;
+    }
+  }
+
+  if (!matchFound) return null;
+
+  // Check if tournament is complete
+  const finalRound = tournament.bracket.rounds[tournament.bracket.rounds.length - 1];
+  const finalMatch = finalRound.matches[0];
+  if (finalMatch.status === 'completed' && finalMatch.winner) {
+    tournament.winner = finalMatch.winner;
+    tournament.status = 'completed';
+    tournament.completedAt = Date.now();
+  }
+
+  await saveTournaments(tournaments);
+  return tournament;
+}
+
+function advanceWinner(tournament: Tournament, match: TournamentMatch, winner: Car): void {
+  if (!match.nextMatchId) return;
+
+  // Find next match and place winner
+  for (const round of tournament.bracket.rounds) {
+    const nextMatch = round.matches.find(m => m.id === match.nextMatchId);
+    if (nextMatch) {
+      if (match.nextMatchSlot === 'car1') {
+        nextMatch.car1 = winner;
+      } else {
+        nextMatch.car2 = winner;
+      }
+
+      // If both cars are set and one is null (bye), auto-advance
+      if (nextMatch.car1 && !nextMatch.car2) {
+        nextMatch.winner = nextMatch.car1;
+        nextMatch.status = 'bye';
+        advanceWinner(tournament, nextMatch, nextMatch.car1);
+      } else if (nextMatch.car2 && !nextMatch.car1) {
+        nextMatch.winner = nextMatch.car2;
+        nextMatch.status = 'bye';
+        advanceWinner(tournament, nextMatch, nextMatch.car2);
+      }
+      break;
+    }
+  }
 }
 
 // ============ LEADERBOARD & STATS ============

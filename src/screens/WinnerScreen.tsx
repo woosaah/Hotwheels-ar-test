@@ -1,4 +1,4 @@
-import React, {useEffect} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   View,
   Text,
@@ -9,13 +9,15 @@ import {
   Animated,
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import type {RootStackParamList, LapResult} from '../types';
+import type {RootStackParamList, LapResult, Tournament} from '../types';
 import {HOT_WHEELS_SCALE} from '../types';
+import {updateTournamentMatch} from '../services/database';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Winner'>;
 
 export default function WinnerScreen({navigation, route}: Props): React.JSX.Element {
-  const {raceResult} = route.params;
+  const {raceResult, tournamentId, matchId} = route.params;
+  const [updatedTournament, setUpdatedTournament] = useState<Tournament | null>(null);
   const sortedLaps = [...raceResult.laps]
     .filter(l => l.didFinish)
     .sort((a, b) => a.finishOrder - b.finishOrder);
@@ -23,6 +25,8 @@ export default function WinnerScreen({navigation, route}: Props): React.JSX.Elem
   const winner = sortedLaps[0];
   const second = sortedLaps[1];
   const third = sortedLaps[2];
+
+  const isTournamentMatch = !!(tournamentId && matchId);
 
   const podiumAnimation = new Animated.Value(0);
 
@@ -33,6 +37,15 @@ export default function WinnerScreen({navigation, route}: Props): React.JSX.Elem
       friction: 7,
       useNativeDriver: true,
     }).start();
+
+    // Update tournament match if this is a tournament race
+    if (isTournamentMatch) {
+      updateTournamentMatch(tournamentId!, matchId!, raceResult).then(tournament => {
+        if (tournament) {
+          setUpdatedTournament(tournament);
+        }
+      });
+    }
   }, []);
 
   const handleShare = async () => {
@@ -179,17 +192,45 @@ export default function WinnerScreen({navigation, route}: Props): React.JSX.Elem
         ))}
       </View>
 
+      {/* Tournament Status */}
+      {isTournamentMatch && updatedTournament && (
+        <View style={styles.tournamentStatus}>
+          <Text style={styles.tournamentStatusTitle}>Tournament Update</Text>
+          {updatedTournament.winner ? (
+            <View style={styles.championBanner}>
+              <Text style={styles.championText}>
+                {updatedTournament.winner.name} is the Champion!
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.tournamentStatusText}>
+              Match recorded. Continue the bracket for more races!
+            </Text>
+          )}
+        </View>
+      )}
+
       {/* Actions */}
       <View style={styles.actions}>
         <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
           <Text style={styles.shareButtonText}>Share Results</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.rematchButton}
-          onPress={() => navigation.navigate('Calibration', {mode: raceResult.mode})}>
-          <Text style={styles.rematchButtonText}>Race Again</Text>
-        </TouchableOpacity>
+        {isTournamentMatch && updatedTournament ? (
+          <TouchableOpacity
+            style={styles.rematchButton}
+            onPress={() => navigation.navigate('TournamentBracket', {tournament: updatedTournament})}>
+            <Text style={styles.rematchButtonText}>
+              {updatedTournament.winner ? 'View Final Bracket' : 'Continue Tournament'}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.rematchButton}
+            onPress={() => navigation.navigate('Calibration', {mode: raceResult.mode})}>
+            <Text style={styles.rematchButtonText}>Race Again</Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity
           style={styles.leaderboardButton}
@@ -495,5 +536,35 @@ const styles = StyleSheet.create({
   homeButtonText: {
     color: '#888',
     fontSize: 14,
+  },
+  tournamentStatus: {
+    backgroundColor: '#1a1a2e',
+    marginHorizontal: 20,
+    marginTop: 20,
+    padding: 20,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  tournamentStatusTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#4ecdc4',
+    marginBottom: 10,
+  },
+  tournamentStatusText: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+  },
+  championBanner: {
+    backgroundColor: '#ffd700',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  championText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#000',
   },
 });

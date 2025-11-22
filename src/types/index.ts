@@ -63,6 +63,9 @@ export interface RaceConfig {
   cars: RaceCar[];
   laneCount: number;
   bestOf?: number; // For tournaments, best of 3, 5, etc.
+  // Tournament context (optional)
+  tournamentId?: string;
+  matchId?: string;
 }
 
 export interface RaceCar {
@@ -208,7 +211,7 @@ export type RootStackParamList = {
   };
   Results: {session: RaceSession};
   RaceResults: {raceResult: RaceResult};
-  Winner: {raceResult: RaceResult};
+  Winner: {raceResult: RaceResult; tournamentId?: string; matchId?: string};
   Leaderboard: undefined;
   CarGarage: undefined;
   CarDetail: {car: Car};

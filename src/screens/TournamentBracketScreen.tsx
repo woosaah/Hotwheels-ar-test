@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useState, useEffect} from 'react';
 import {
   View,
   Text,
@@ -8,12 +8,29 @@ import {
   Alert,
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import type {RootStackParamList, TournamentMatch} from '../types';
+import type {RootStackParamList, TournamentMatch, CalibrationData, RaceConfig} from '../types';
+import {loadCalibration, getTournament} from '../services/database';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TournamentBracket'>;
 
 export default function TournamentBracketScreen({navigation, route}: Props): React.JSX.Element {
-  const {tournament} = route.params;
+  const [tournament, setTournament] = useState(route.params.tournament);
+  const [calibration, setCalibration] = useState<CalibrationData | null>(null);
+
+  useEffect(() => {
+    loadCalibration().then(setCalibration);
+  }, []);
+
+  // Refresh tournament data when screen comes into focus
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', async () => {
+      const updated = await getTournament(tournament.id);
+      if (updated) {
+        setTournament(updated);
+      }
+    });
+    return unsubscribe;
+  }, [navigation, tournament.id]);
 
   const handleMatchPress = (match: TournamentMatch) => {
     if (match.status === 'bye') {
@@ -21,7 +38,10 @@ export default function TournamentBracketScreen({navigation, route}: Props): Rea
       return;
     }
     if (match.status === 'completed') {
-      Alert.alert('Match Complete', `Winner: ${match.winner?.name}`);
+      Alert.alert(
+        'Match Complete',
+        `Winner: ${match.winner?.name}\nScore: ${match.car1Wins} - ${match.car2Wins}`,
+      );
       return;
     }
     if (!match.car1 || !match.car2) {
@@ -29,15 +49,44 @@ export default function TournamentBracketScreen({navigation, route}: Props): Rea
       return;
     }
 
-    // Navigate to race this match
+    // Check calibration
+    if (!calibration) {
+      Alert.alert(
+        'Calibration Required',
+        'Please calibrate your track before racing',
+        [
+          {text: 'Cancel', style: 'cancel'},
+          {
+            text: 'Calibrate',
+            onPress: () => navigation.navigate('Calibration', {mode: 'tournament'}),
+          },
+        ],
+      );
+      return;
+    }
+
+    // Create race config with tournament context
+    const raceConfig: RaceConfig = {
+      mode: 'tournament',
+      calibrationId: calibration.id,
+      cars: [
+        {car: match.car1, lane: 1, color: match.car1.color},
+        {car: match.car2, lane: 2, color: match.car2.color},
+      ],
+      laneCount: 2,
+      bestOf: tournament.bestOf,
+      tournamentId: tournament.id,
+      matchId: match.id,
+    };
+
     Alert.alert(
-      'Start Match',
       `${match.car1.name} vs ${match.car2.name}`,
+      `Score: ${match.car1Wins} - ${match.car2Wins}\nFirst to ${Math.ceil(tournament.bestOf / 2)} wins`,
       [
         {text: 'Cancel', style: 'cancel'},
         {
           text: 'Race!',
-          onPress: () => navigation.navigate('Calibration', {mode: 'head_to_head'}),
+          onPress: () => navigation.navigate('Recording', {calibration, raceConfig}),
         },
       ],
     );
@@ -61,11 +110,11 @@ export default function TournamentBracketScreen({navigation, route}: Props): Rea
 
         {/* Bracket */}
         <View style={styles.bracket}>
-          {tournament.bracket.rounds.map((round, roundIndex) => (
+          {tournament.bracket.rounds.map((round) => (
             <View key={round.roundNumber} style={styles.round}>
               <Text style={styles.roundName}>{round.name}</Text>
               <View style={styles.matchesContainer}>
-                {round.matches.map((match, matchIndex) => (
+                {round.matches.map((match) => (
                   <TouchableOpacity
                     key={match.id}
                     style={[
